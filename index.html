@@ -2,143 +2,142 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Professional AR.js Experience</title>
+<title>Real-Time Laptop Detection (AI + Camera)</title>
 
-<!-- A-Frame -->
-<script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+<!-- TensorFlow.js -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0/dist/tf.min.js"></script>
 
-<!-- AR.js -->
-<script src="https://cdn.rawgit.com/jeromeetienne/AR.js/2.2.1/aframe/build/aframe-ar.js"></script>
+<!-- COCO-SSD Model -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 
 <style>
 body {
   margin: 0;
+  background: black;
   overflow: hidden;
   font-family: Arial, sans-serif;
 }
 
-/* Loading screen */
-#loader {
-  position: fixed;
-  inset: 0;
-  background: #000;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  font-size: 20px;
+#video {
+  position: absolute;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
 }
 
-/* UI Panel */
-#ui {
+#canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+#label {
   position: fixed;
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
-  gap: 10px;
-  z-index: 1000;
+  background: rgba(0,0,0,0.7);
+  color: #00ffcc;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-size: 16px;
+  z-index: 10;
 }
 
-#ui button {
-  padding: 10px 16px;
-  border: none;
-  border-radius: 20px;
-  background: rgba(0,0,0,0.7);
+#loader {
+  position: fixed;
+  inset: 0;
+  background: black;
   color: white;
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  font-size: 22px;
 }
 </style>
 </head>
 
 <body>
 
-<div id="loader">Loading AR Experience...</div>
+<div id="loader">Loading AI Model...</div>
+<div id="label">Detecting objects...</div>
 
-<div id="ui">
-  <button onclick="rotateModel()">Rotate</button>
-  <button onclick="scaleUp()">Zoom +</button>
-  <button onclick="scaleDown()">Zoom -</button>
-  <button onclick="resetModel()">Reset</button>
-</div>
-
-<a-scene
-  embedded
-  arjs="sourceType: webcam; debugUIEnabled: false;"
-  renderer="antialias: true; colorManagement: true;"
-  vr-mode-ui="enabled: false"
->
-
-<!-- ASSETS -->
-<a-assets>
-  <a-asset-item
-    id="robot"
-    src="https://cdn.aframe.io/test-models/models/RobotExpressive/RobotExpressive.glb">
-  </a-asset-item>
-</a-assets>
-
-<!-- MARKER -->
-<a-marker
-  preset="hiro"
-  smooth="true"
-  smoothCount="15"
-  smoothTolerance="0.01"
->
-
-  <!-- LIGHTING -->
-  <a-entity light="type: ambient; intensity: 1.2"></a-entity>
-  <a-entity light="type: directional; intensity: 1.5" position="1 3 2"></a-entity>
-
-  <!-- MODEL -->
-  <a-entity
-    id="mainModel"
-    gltf-model="#robot"
-    position="0 0 0"
-    rotation="0 180 0"
-    scale="0.35 0.35 0.35"
-    animation__idle="property: rotation; to: 0 540 0; loop: true; dur: 12000; easing: linear"
-  ></a-entity>
-
-</a-marker>
-
-<!-- CAMERA -->
-<a-entity camera></a-entity>
-
-</a-scene>
+<video id="video" autoplay muted playsinline></video>
+<canvas id="canvas"></canvas>
 
 <script>
-const model = document.getElementById("mainModel");
-let scale = 0.35;
-let rotation = 180;
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const label = document.getElementById("label");
+const loader = document.getElementById("loader");
 
-// Remove loader when scene is ready
-document.querySelector("a-scene").addEventListener("loaded", () => {
-  document.getElementById("loader").style.display = "none";
-});
+let model;
 
-// UI FUNCTIONS
-function rotateModel() {
-  rotation += 45;
-  model.setAttribute("rotation", `0 ${rotation} 0`);
+// Start camera
+async function startCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment" },
+    audio: false
+  });
+  video.srcObject = stream;
+  return new Promise(resolve => {
+    video.onloadedmetadata = () => resolve();
+  });
 }
 
-function scaleUp() {
-  scale += 0.05;
-  model.setAttribute("scale", `${scale} ${scale} ${scale}`);
+// Load AI model
+async function loadModel() {
+  model = await cocoSsd.load();
+  loader.style.display = "none";
+  detectFrame();
 }
 
-function scaleDown() {
-  scale = Math.max(0.1, scale - 0.05);
-  model.setAttribute("scale", `${scale} ${scale} ${scale}`);
+// Detection loop
+async function detectFrame() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  const predictions = await model.detect(video);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  let laptopFound = false;
+
+  predictions.forEach(pred => {
+    if (pred.class === "laptop" && pred.score > 0.6) {
+      laptopFound = true;
+
+      const [x, y, width, height] = pred.bbox;
+
+      // Draw box
+      ctx.strokeStyle = "#00ffcc";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, width, height);
+
+      // Draw label
+      ctx.fillStyle = "#00ffcc";
+      ctx.font = "18px Arial";
+      ctx.fillText(
+        `Laptop ${(pred.score * 100).toFixed(1)}%`,
+        x,
+        y > 20 ? y - 10 : y + 20
+      );
+    }
+  });
+
+  label.innerText = laptopFound
+    ? "Laptop detected ✅"
+    : "Show a laptop to the camera";
+
+  requestAnimationFrame(detectFrame);
 }
 
-function resetModel() {
-  scale = 0.35;
-  rotation = 180;
-  model.setAttribute("scale", `${scale} ${scale} ${scale}`);
-  model.setAttribute("rotation", `0 ${rotation} 0`);
-}
+// INIT
+(async () => {
+  await startCamera();
+  await loadModel();
+})();
 </script>
 
 </body>
